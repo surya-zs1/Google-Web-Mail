@@ -9,11 +9,13 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'default_cyber_secret_123')
 
 # Admin & IMAP Credentials
-ADMIN_USER = os.environ.get('ADMIN_USER', 'cyber')
-ADMIN_PASS = os.environ.get('ADMIN_PASS', '1948s')
+ADMIN_USER = os.environ.get('ADMIN_USER')
+ADMIN_PASS = os.environ.get('ADMIN_PASS')
 IMAP_USER = os.environ.get('IMAP_USER')
 IMAP_PASS = os.environ.get('IMAP_PASS')
-IMAP_SERVER = "imap-mail.outlook.com"
+
+# UPDATE: Switched to Gmail's IMAP server to bypass Outlook's block
+IMAP_SERVER = "imap.gmail.com"
 
 def is_admin():
     return session.get('logged_in') is True
@@ -62,13 +64,16 @@ def get_account():
 def get_messages():
     if not is_admin(): return jsonify({"error": "Unauthorized"}), 401
     try:
-        # Securely connect to Outlook
+        # Securely connect to Gmail
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(IMAP_USER, IMAP_PASS)
         mail.select("inbox")
         
         # Grab the 15 most recent emails
         status, messages = mail.search(None, "ALL")
+        if not messages[0]:
+            return jsonify([])
+            
         email_ids = messages[0].split()[-15:] 
         email_ids.reverse() 
         
