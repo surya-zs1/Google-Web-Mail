@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Private Permanent Mail</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin: 0; padding: 20px; background: #1e1e2e; color: #cdd6f4; }
+        .container { max-width: 800px; margin: auto; background: #181825; padding: 30px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h1 { margin-top: 0; color: #b4befe; }
+        
+        .input-group { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        input { padding: 12px; font-size: 16px; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; outline: none; }
+        .email-input { width: 80%; font-weight: bold; text-align: center; }
+        
+        button { padding: 10px 15px; font-size: 14px; cursor: pointer; font-weight: bold; background: #89b4fa; color: #11111b; border: none; border-radius: 6px; transition: 0.2s; }
+        button:hover { background: #74c7ec; }
+        .danger-btn { background: #f38ba8; color: #11111b; }
+        .danger-btn:hover { background: #eba0ac; }
+        
+        .controls { margin-bottom: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+        .section-box { background: #313244; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: left; }
+        
+        .message { border-left: 4px solid #89b4fa; background: #1e1e2e; padding: 15px; margin-top: 10px; border-radius: 5px; cursor: pointer; transition: 0.2s; }
+        .message:hover { background: #45475a; }
+        #message-content { margin-top: 20px; padding: 20px; background: #cdd6f4; color: #11111b; border-radius: 8px; display: none; overflow-x: auto; text-align: left;}
+        
+        #admin-login-container { max-width: 400px; margin: 100px auto; background: #181825; padding: 40px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #admin-login-container input { width: 90%; margin-bottom: 15px; text-align: left; }
+        #admin-login-container button { width: 97%; padding: 12px; font-size: 16px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="admin-login-container" style="display: none;">
+        <h2>Admin Login</h2>
+        <input type="text" id="admin-uname" placeholder="Username">
+        <input type="password" id="admin-pass" placeholder="Password">
+        <button onclick="adminLogin()">Login</button>
+        <p id="login-error" style="color: #f38ba8; margin-top: 15px; font-size: 14px;"></p>
+    </div>
+
+    <div class="container" id="app-container" style="display: none;">
+        <h1>Private Mail Vault</h1>
+        <p style="color: #a6adc8; font-size: 14px; margin-bottom: 20px;">Direct IMAP Connection: Secure</p>
+        
+        <div class="input-group">
+            <input type="text" id="email-address" class="email-input" readonly placeholder="Loading permanent address...">
+            <button id="copy-mail-btn" onclick="copyData('email-address', 'copy-mail-btn')">Copy Mail</button>
+        </div>
+        
+        <div class="controls">
+            <button onclick="fetchEmails()">🔄 Refresh Outlook Inbox</button>
+            <button class="danger-btn" onclick="adminLogout()">🚪 Logout</button>
+        </div>
+
+        <div class="section-box">
+            <h3>Inbox <span style="font-size: 12px; color: #a6adc8;">(Auto-refreshes every 15s)</span></h3>
+            <div id="messages-list">Connecting to Microsoft Servers...</div>
+        </div>
+
+        <div id="message-content"></div>
+    </div>
+
+    <script>
+        let refreshInterval;
+
+        window.onload = async () => {
+            const res = await fetch('/api/auth/status', { cache: 'no-store' });
+            const data = await res.json();
+            if (data.logged_in) {
+                initApp();
+            } else {
+                document.getElementById('admin-login-container').style.display = 'block';
+            }
+        };
+
+        async function adminLogin() {
+            const uname = document.getElementById('admin-uname').value;
+            const pass = document.getElementById('admin-pass').value;
+            const err = document.getElementById('login-error');
+            
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: uname, password: pass})
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                err.innerText = "";
+                document.getElementById('admin-login-container').style.display = 'none';
+                initApp();
+            } else {
+                err.innerText = data.error;
+            }
+        }
+
+        async function adminLogout() {
+            if (refreshInterval) clearInterval(refreshInterval);
+            try { await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' }); } catch(e) {}
+            window.location.replace('/');
+        }
+
+        async function initApp() {
+            document.getElementById('app-container').style.display = 'block';
+            
+            // Fetch the dedicated Outlook email you put in the Render Environment Variables
+            const accountRes = await fetch('/api/account');
+            const accountData = await accountRes.json();
+            document.getElementById('email-address').value = accountData.email || "Error loading email";
+            
+            if (refreshInterval) clearInterval(refreshInterval);
+            refreshInterval = setInterval(fetchEmails, 15000); 
+            fetchEmails();
+        }
+
+        async function fetchEmails() {
+            const list = document.getElementById('messages-list');
+            const response = await fetch('/api/messages', { cache: 'no-store' });
+            const messages = await response.json();
+            
+            if (messages.error) {
+                list.innerHTML = `<p style="color:#f38ba8;">IMAP Error: ${messages.error}</p>`;
+                return;
+            }
+
+            if (messages.length === 0) {
+                list.innerHTML = "No messages found in Outlook Inbox.";
+                return;
+            }
+            
+            list.innerHTML = "";
+            messages.forEach(msg => {
+                const div = document.createElement('div');
+                div.className = 'message';
+                div.innerHTML = `<strong>From:</strong> ${msg.from} <br> <strong>Subject:</strong> ${msg.subject}`;
+                div.onclick = () => readMessage(msg.id);
+                list.appendChild(div);
+            });
+        }
+
+        async function readMessage(id) {
+            const contentDiv = document.getElementById('message-content');
+            contentDiv.style.display = "block";
+            contentDiv.innerHTML = "Loading full email body from server...";
+
+            const response = await fetch(`/api/read?id=${id}`, { cache: 'no-store' });
+            const msg = await response.json();
+            if (msg.error) return;
+
+            const bodyContent = msg.htmlBody ? msg.htmlBody : `<pre>${msg.textBody}</pre>`;
+            contentDiv.innerHTML = `<h4>${msg.subject}</h4><p><b>From:</b> ${msg.from}</p><hr>${bodyContent}`;
+        }
+
+        function copyData(inputId, btnId) {
+            const input = document.getElementById(inputId);
+            input.select();
+            input.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(input.value);
+            const btn = document.getElementById(btnId);
+            const originalText = btn.innerText;
+            btn.innerText = "Copied!";
+            setTimeout(() => btn.innerText = originalText, 2000);
+        }
+    </script>
+</body>
+</html>
